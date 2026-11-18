@@ -1,0 +1,64 @@
+
+CHIP CPU {
+
+    IN  inM[16],         // M value input  (M = contents of RAM[A])
+        instruction[16], // Instruction for execution
+        reset;           // Signals whether to re-start the current
+                         // program (reset==1) or continue executing
+                         // the current program (reset==0).
+
+    OUT outM[16],        // M value output
+        writeM,          // Write to M? 
+        addressM[15],    // Address in data memory (of M)
+        pc[15];          // address of next instruction
+
+    PARTS:
+    // Decode instruction type: A-instruction (instruction[15] == 0) vs C-instruction (instruction[15] == 1)
+    Not(in=instruction[15], out=isAInstruction);
+    Not(in=isAInstruction, out=isCInstruction);
+
+    // Select input to A-register: instruction (if A-instruction) or ALU output (if C-instruction)
+    Mux16(a=aluOut, b=instruction, sel=isAInstruction, out=inAReg);
+
+    // Load A-register if it's an A-instruction OR if C-instruction dest bit d1 (instruction[5]) is 1
+    And(a=isCInstruction, b=instruction[5], out=destA);
+    Or(a=isAInstruction, b=destA, out=loadA);
+    ARegister(in=inAReg, load=loadA, out=outAReg, out[0..14]=addressM);
+
+    // Select second ALU input (y): A-register (a-bit == 0) or inM (a-bit == 1, instruction[12])
+    Mux16(a=outAReg, b=inM, sel=instruction[12], out=aluY);
+
+    // Load D-register if C-instruction AND dest bit d2 (instruction[4]) is 1
+    And(a=isCInstruction, b=instruction[4], out=loadD);
+    DRegister(in=aluOut, load=loadD, out=outDReg);
+
+    // Arithmetic Logic Unit (comp bits c1..c6 correspond to instruction[11..6])
+    ALU(x=outDReg, y=aluY,
+        zx=instruction[11],
+        nx=instruction[10],
+        zy=instruction[9],
+        ny=instruction[8],
+        f=instruction[7],
+        no=instruction[6],
+        out=aluOut, out=outM, zr=zrOut, ng=ngOut);
+
+    // Write to Memory (writeM) if C-instruction AND dest bit d3 (instruction[3]) is 1
+    And(a=isCInstruction, b=instruction[3], out=writeM);
+
+    // Jump logic: evaluate j1 (instruction[2], < 0), j2 (instruction[1], == 0), j3 (instruction[0], > 0)
+    And(a=ngOut, b=instruction[2], out=jlt); // Jump if negative
+    And(a=zrOut, b=instruction[1], out=jeq); // Jump if zero
+
+    // Positive check: not negative AND not zero
+    Or(a=ngOut, b=zrOut, out=ngOrZr);
+    Not(in=ngOrZr, out=posOut);
+    And(a=posOut, b=instruction[0], out=jgt); // Jump if positive
+
+    // Combine jump conditions and ensure it's a C-instruction
+    Or(a=jlt, b=jeq, out=jle);
+    Or(a=jle, b=jgt, out=jumpCondition);
+    And(a=isCInstruction, b=jumpCondition, out=loadPC);
+
+    // Program Counter: reset > load (jump) > inc
+    PC(in=outAReg, load=loadPC, inc=true, reset=reset, out[0..14]=pc);
+}

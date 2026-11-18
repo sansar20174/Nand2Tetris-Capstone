@@ -1,0 +1,25 @@
+
+CHIP Memory {
+    IN in[16], load, address[15];
+    OUT out[16];
+
+    PARTS:
+    // Route load signal using the top two address bits (address[13..14]):
+    // 00, 01 -> RAM16K (0x0000 - 0x3FFF)
+    // 10     -> Screen (0x4000 - 0x5FFF)
+    // 11     -> Keyboard (0x6000, read-only)
+    DMux4Way(in=load, sel=address[13..14], a=loadRam1, b=loadRam2, c=loadScreen, d=loadKbd);
+    Or(a=loadRam1, b=loadRam2, out=loadRam);
+
+    // 16K Data RAM (14-bit address)
+    RAM16K(in=in, load=loadRam, address=address[0..13], out=ramOut);
+
+    // 8K Screen memory map (13-bit address)
+    Screen(in=in, load=loadScreen, address=address[0..12], out=screenOut);
+
+    // Keyboard memory map (single 16-bit register)
+    Keyboard(out=kbdOut);
+
+    // Select output based on the same top two address bits
+    Mux4Way16(a=ramOut, b=ramOut, c=screenOut, d=kbdOut, sel=address[13..14], out=out);
+}
